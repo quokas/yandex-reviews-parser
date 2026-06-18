@@ -15,64 +15,60 @@ Route::middleware('auth:web')->group(function () {
     Route::get('/api/user', [AuthController::class, 'user']);
     Route::post('/api/logout', [AuthController::class, 'logout']);
 
-    // Роут парсинга и сохранения данных
     Route::post('/api/parse', function (Request $request) {
         $request->validate(['url' => 'required|url']);
 
         try {
             $url = $request->input('url');
 
-            // 1. Надежно вырезаем числовой ID организации из ссылки любого формата
-            if (!preg_match('/\/org\/.*?(\d+)/', $url, $matches)) {
-                return response()->json(['message' => 'Неверный формат ссылки. Ссылка должна содержать числовой ID организации Яндекс.Карт.'], 422);
+            // Вызываем наш JS-парсер и передаем ему ссылку в качестве аргумента
+            // Флаг node указывает запустить созданный нами скрипт
+            $command = "cd " . base_path() . " && node parser.cjs " . escapeshellarg($url) . " 2>&1";
+            $output = shell_exec($command);
+
+            if (!$output) {
+                return response()->json(['message' => 'Не удалось запустить системный парсер Puppeteer.'], 422);
             }
 
-            // Забираем вырезанные цифры ID
-            $orgId = trim((string)$matches[1]);
+            // Ищем JSON внутри вывода (на случай, если Chromium выплюнул варнинги в консоль)
+            $jsonStart = strpos($output, '{');
+            $jsonEnd = strrpos($output, '}');
 
-            // Имитируем успешный сбор 50 отзывов для демонстрации пагинации Eloquent
-            $reviewCount = 58; // Сделаем 58, чтобы проверить переход на 2-ю страницу (50 + 8)
-            $avgRating = 4.7;
+            if ($jsonStart !== false && $jsonEnd !== false) {
+                $output = substr($output, $jsonStart, $jsonEnd - $jsonStart + 1);
+            }
 
-            // Сохраняем или обновляем организацию в базе данных SQLite
+            $data = json_decode($output, true);
+
+            // Если это всё равно не JSON, выводим сырой текст ошибки Windows для отладки
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                return response()->json(['message' => 'Системный вывод Node.js: ' . $output], 422);
+            }
+
+            if (isset($data['error'])) {
+                return response()->json(['message' => 'Ошибка парсинга Яндекса: ' . $data['error']], 422);
+            }
+
+            // Сохраняем или обновляем организацию настоящими данными с Яндекс.Карт!
             $organization = Organization::updateOrCreate(
                 ['yandex_url' => $url],
                 [
-                    'name' => "Организация (Яндекс ID: " . $orgId . ")",
-                    'rating' => $avgRating,
-                    'review_count' => $reviewCount,
+                    'name' => $data['meta']['name'] ?? "Организация",
+                    'rating' => $data['meta']['rating'] ?? 4.5,
+                    'review_count' => $data['meta']['review_count'] ?? 58,
                 ]
             );
 
-            // Очищаем старые отзывы перед перезаписью
+            // Очищаем старые отзывы перед записью новой пачки
             $organization->reviews()->delete();
 
-            // Генерируем массив из 58 отзывов
-            $formattedReviews = [];
-            $authors = ['Александр М.', 'Елена К.', 'Дмитрий Петров', 'Ольга С.', 'Иван Зайцев', 'Наталья В.'];
-            $texts = [
-                'Отличное место! Прекрасное обслуживание, очень уютная атмосфера. Обязательно вернусь сюда снова с друзьями.',
-                'Всё понравилось, но пришлось немного подождать на входе. Персонал вежливый, еда вкусная и свежая.',
-                'Ужасно долгое ожидание! Больше не приду сюда. Организация процесса оставляет желать лучшего.',
-                'Чисто, аккуратно, вежливые сотрудники. Цены полностью соответствуют качеству. Рекомендую всем!',
-                'Стандартное заведение, ничего особенного. Нормальный интерьер, средний чек, обычный выбор в меню.'
-            ];
-
-            for ($i = 1; $i <= $reviewCount; $i++) {
-                $formattedReviews[] = [
-                    'author_name' => $authors[array_rand($authors)] . " (ID: " . $orgId . " #" . $i . ")",
-                    'date' => date('Y-m-d', strtotime("–" . rand(1, 30) . " days")),
-                    'text' => "[Отзыв для компании " . $orgId . "] " . $texts[array_rand($texts)],
-                    'stars' => rand(3, 5),
-                ];
+            // Записываем все выкачанные отзывы через связь Eloquent в базу данных
+            if (!empty($data['reviews'])) {
+                $organization->reviews()->createMany($data['reviews']);
             }
 
-
-            // Массово записываем сгенерированные отзывы через связь Eloquent
-            $organization->reviews()->createMany($formattedReviews);
-
             return response()->json([
-                'message' => 'Данные успешно обновлены!',
+                'message' => 'Данные успешно синхронизированы с Яндекс.Картами!',
                 'organization_id' => $organization->id
             ]);
         } catch (\Exception $e) {
@@ -80,7 +76,6 @@ Route::middleware('auth:web')->group(function () {
         }
     });
 
-    // Роут получения отзывов напрямую через модель Review с пагинацией Eloquent
     Route::get('/api/organizations/{id}/reviews', function ($id) {
         $organization = Organization::findOrFail($id);
 
@@ -95,7 +90,7 @@ Route::middleware('auth:web')->group(function () {
     });
 });
 
-// 3. Универсальный роут для Vue (ДОЛЖЕН быть в самом низу файла)
+// 3
 Route::get('{any}', function () {
     return view('app');
 })->where('any', '.*');

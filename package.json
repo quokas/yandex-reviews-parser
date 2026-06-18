@@ -18,6 +18,7 @@
     "dependencies": {
         "@vitejs/plugin-vue": "^6.0.7",
         "axios": "^1.18.0",
+        "puppeteer": "^25.1.0",
         "vue": "^3.5.38"
     }
 }
