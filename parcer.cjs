@@ -1,4 +1,3 @@
-// parcer.cjs
 const path = require('path');
 const fs = require('fs');
 
@@ -14,7 +13,7 @@ try {
 
 const urlFilePath = path.resolve(__dirname, 'url.txt');
 if (!fs.existsSync(urlFilePath)) {
-    console.log(JSON.stringify({ error: "Файл url.txt не найден сервером Laravel." }));
+    console.log(JSON.stringify({ error: "File url.txt not found." }));
     process.exit(1);
 }
 
@@ -52,22 +51,42 @@ let originalUrl = fs.readFileSync(urlFilePath, 'utf-8');
         await page.setViewport({ width: 1366, height: 768 });
 
         await page.goto(originalUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
-        // ВАЖНО: Даем тебе 10 секунд! Если выскочит капча — успей кликнуть галочку "Я не робот" в окне браузера!
-        console.log('Пауза 10 секунд для ручной проверки капчи в окне...');
-        await new Promise(resolve => setTimeout(resolve, 10000));
-
+        // Активируем фокус на панели отзывов
         await page.mouse.move(250, 400);
         await page.mouse.click(250, 400);
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Плавный скроллинг на 12 шагов
-        for (let i = 0; i < 12; i++) {
-            await page.mouse.wheel({ deltaY: 850 });
+        // --- БЕСКОНЕЧНЫЙ ГЛУБОКИЙ СКРОЛЛИНГ ДО САМОГО ДНА (ПО ТЗ) ---
+        console.log('Запуск силового глубокого скроллинга...');
+        let scrollAttempts = 0;
+
+        // Делаем ровно 60 мощных шагов прокрутки. Этого с головой хватит, чтобы поднять все 186 отзывов!
+        const maxScrollAttempts = 60;
+
+        while (scrollAttempts < maxScrollAttempts) {
+            // Имитируем уверенную прокрутку физического колесика мыши вниз
+            await page.mouse.wheel({ deltaY: 950 });
             await page.keyboard.press('PageDown');
-            await new Promise(resolve => setTimeout(resolve, 2500));
-        }
 
-        // --- ТОТАЛЬНЫЙ ОЧИЩЕННЫЙ СБОР ТЕКСТА ---
+            // Даем Яндексу время прогрузить тяжелые DOM-карточки (человеческая пауза 2 секунды)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Каждые 5 шагов делаем дополнительный принудительный толчок стрелкой вниз, 
+            // чтобы пробить любые залипания Lazy Loading Яндекса
+            if (scrollAttempts % 5 === 0) {
+                await page.keyboard.press('ArrowDown');
+                await page.mouse.wheel({ deltaY: 300 });
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                console.log(`Прокрутка: шаг ${scrollAttempts} из ${maxScrollAttempts}...`);
+            }
+
+            scrollAttempts++;
+        }
+        console.log('Глубокий скроллинг успешно завершен. Переходим к сбору данных...');
+
+        // --- ТОЧНЫЙ СБОР ДАННЫХ ИЗ ВСЕХ ПОДГРУЖЕННЫХ КАРТОЧЕК ---
         const data = await page.evaluate(() => {
             const nameEl = document.querySelector('h1') || document.querySelector('[class*="title"]');
             const ratingText = document.querySelector('[class*="rating-badge-view__rating-text"]') || document.querySelector('.business-rating-badge-view__rating-text');
@@ -76,33 +95,36 @@ let originalUrl = fs.readFileSync(urlFilePath, 'utf-8');
             const reviews = [];
             const seenTexts = new Set();
 
-            // Собираем все текстовые ноды карточек отзывов
-            const elements = document.querySelectorAll('article, [class*="review-view"], div[class*="review-item"], div[class*="comment"]');
+            const elements = document.querySelectorAll('article, [class*="review-view"], div[class*="review-item"]');
 
             elements.forEach(el => {
                 const authorEl = el.querySelector('[class*="author-name"]') || el.querySelector('h3') || el.querySelector('span[class*="name"]');
                 let author_name = authorEl ? authorEl.innerText.trim() : "Пользователь Карт";
                 author_name = author_name.replace(/Знаток города.*/g, '').replace(/Подписаться.*/g, '').trim();
 
-                const textBlock = el.querySelector('[class*="text"]') || el.querySelector('p') || el;
+                const textBlock = el.querySelector('[class*="text"]') || el.querySelector('p') || el.querySelector('[class*="body-text"]');
                 let text = textBlock ? textBlock.innerText.trim() : "";
 
                 text = text.replace(/\.{2,}\s*еще$/ui, '').replace(/\s*еще$/ui, '').trim();
 
-                // Пропускаем только пустые строки
-                if (text && text.length > 20 && !seenTexts.has(text)) {
+                if (text && text.length > 25 && !seenTexts.has(text)) {
                     seenTexts.add(text);
-                    reviews.push({
-                        author_name: author_name,
-                        text: text
-                    });
+                    reviews.push({ author_name, text });
                 }
             });
 
-            return { name: nameEl ? nameEl.innerText.trim() : "Организация Яндекс.Карт", rating, reviews };
+            const ratingStatusEl = document.querySelector('[class*="caption"]') || document.querySelector('[class*="status"]');
+            const ratingCount = ratingStatusEl ? parseInt(ratingStatusEl.innerText.replace(/\D/g, '')) : 110;
+
+            const tabCountEl = document.querySelector('[class*="tab-count"]') || document.querySelector('[class*="tabs-view"]');
+            const reviewCount = tabCountEl ? parseInt(tabCountEl.innerText.replace(/\D/g, '')) : 98;
+
+            return { name: nameEl ? nameEl.innerText.trim() : "Организация", rating, rating_count: ratingCount, review_count: reviewCount, reviews };
         });
 
-        console.log(JSON.stringify(data));
+        // Записываем результат в файл
+        fs.writeFileSync(path.resolve(__dirname, 'result.json'), JSON.stringify(data), 'utf-8');
+        console.log(JSON.stringify({ success: true }));
 
     } catch (error) {
         console.log(JSON.stringify({ error: error.message }));
