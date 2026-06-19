@@ -8,6 +8,7 @@
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.3.1",
+        "@vitejs/plugin-vue": "^6.0.7",
         "autoprefixer": "^10.5.0",
         "concurrently": "^9.0.1",
         "laravel-vite-plugin": "^3.1",
@@ -16,9 +17,11 @@
         "vite": "^8.0.0"
     },
     "dependencies": {
-        "@vitejs/plugin-vue": "^6.0.7",
         "axios": "^1.18.0",
         "puppeteer": "^25.1.0",
+        "puppeteer-extra": "^3.3.6",
+        "puppeteer-extra-plugin-stealth": "^2.11.2",
+        "sqlite3": "^6.0.1",
         "vue": "^3.5.38"
     }
 }

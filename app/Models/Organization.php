@@ -2,15 +2,25 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Organization extends Model
 {
-    protected $fillable = ['yandex_url', 'name', 'rating', 'review_count'];
+    use HasFactory;
 
-    public function reviews(): HasMany
+    // Массовое заполнение полей
+    protected $fillable = [
+        'yandex_url',
+        'name',
+        'rating',
+        'rating_count',
+        'review_count'
+    ];
+
+    // Отношение к отзывам
+    public function reviews()
     {
         return $this->hasMany(Review::class);
     }
-}
+} // Скобка должна закрывать класс ТОЛЬКО ЗДЕСЬ, в самом конце файла!

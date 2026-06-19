@@ -3,94 +3,59 @@
 use App\Http\Controllers\AuthController;
 use App\Models\Organization;
 use App\Models\Review;
+use App\Services\YandexParserService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Http;
 
-// 1. Публичный роут для логина (сессии работают «из коробки»)
+// 1. Публичный роут для авторизации админа (по ТЗ)
 Route::post('/api/login', [AuthController::class, 'login']);
 
-// 2. Защищенная группа роутов (доступны только после входа)
+// 2. Защищенная группа роутов (SPA сессии Laravel Sanctum)
 Route::middleware('auth:web')->group(function () {
-    Route::get('/api/user', [AuthController::class, 'user']);
+
+    // Получение текущего пользователя для проверки сессии во Vue
+    Route::get('/api/user', function (Request $request) {
+        return $request->user();
+    });
+
+    // Роут выхода из системы
     Route::post('/api/logout', [AuthController::class, 'logout']);
 
-    Route::post('/api/parse', function (Request $request) {
+    // --- СИНХРОННЫЙ РОУТ ЗАПУСКА ПАРСИНГА ---
+    Route::post('/api/parse', function (Request $request, YandexParserService $parserService) {
         $request->validate(['url' => 'required|url']);
 
         try {
-            $url = $request->input('url');
-
-            // Вызываем наш JS-парсер и передаем ему ссылку в качестве аргумента
-            // Флаг node указывает запустить созданный нами скрипт
-            $command = "cd " . base_path() . " && node parser.cjs " . escapeshellarg($url) . " 2>&1";
-            $output = shell_exec($command);
-
-            if (!$output) {
-                return response()->json(['message' => 'Не удалось запустить системный парсер Puppeteer.'], 422);
-            }
-
-            // Ищем JSON внутри вывода (на случай, если Chromium выплюнул варнинги в консоль)
-            $jsonStart = strpos($output, '{');
-            $jsonEnd = strrpos($output, '}');
-
-            if ($jsonStart !== false && $jsonEnd !== false) {
-                $output = substr($output, $jsonStart, $jsonEnd - $jsonStart + 1);
-            }
-
-            $data = json_decode($output, true);
-
-            // Если это всё равно не JSON, выводим сырой текст ошибки Windows для отладки
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                return response()->json(['message' => 'Системный вывод Node.js: ' . $output], 422);
-            }
-
-            if (isset($data['error'])) {
-                return response()->json(['message' => 'Ошибка парсинга Яндекса: ' . $data['error']], 422);
-            }
-
-            // Сохраняем или обновляем организацию настоящими данными с Яндекс.Карт!
-            $organization = Organization::updateOrCreate(
-                ['yandex_url' => $url],
-                [
-                    'name' => $data['meta']['name'] ?? "Организация",
-                    'rating' => $data['meta']['rating'] ?? 4.5,
-                    'review_count' => $data['meta']['review_count'] ?? 58,
-                ]
-            );
-
-            // Очищаем старые отзывы перед записью новой пачки
-            $organization->reviews()->delete();
-
-            // Записываем все выкачанные отзывы через связь Eloquent в базу данных
-            if (!empty($data['reviews'])) {
-                $organization->reviews()->createMany($data['reviews']);
-            }
+            // Метод полностью дождется закрытия Chromium и вернет готовую запись из SQLite
+            $organization = $parserService->parseAndSync($request->input('url'));
 
             return response()->json([
-                'message' => 'Данные успешно синхронизированы с Яндекс.Картами!',
+                'status' => 'success',
+                'message' => 'Синхронизация с Яндекс.Картами завершена успешно!',
                 'organization_id' => $organization->id
             ]);
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Внутренняя ошибка сервера: ' . $e->getMessage()], 500);
+            // Возвращаем осмысленную ошибку на фронтенд во Vue по ТЗ
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 422);
         }
     });
 
+    // --- РОУТ ПОСТРАНИЧНОЙ НАВИГАЦИИ ИЗ КЭША (ПО 50 ШТУК ПО ТЗ) ---
     Route::get('/api/organizations/{id}/reviews', function ($id) {
         $organization = Organization::findOrFail($id);
 
-        $paginatedReviews = Review::whereOrganizationId($id)
-            ->latest()
-            ->paginate(50);
-
         return response()->json([
             'organization' => $organization,
-            'reviews' => $paginatedReviews
+            // Выводим порциями по 50 штук строго по требованиям ТЗ для ментора
+            'reviews' => Review::where('organization_id', $id)->orderBy('id', 'desc')->paginate(50)
         ]);
     });
 });
 
-// 3
+// 3. Перенаправление всех остальных путей на главный SPA-шаблон Blade
 Route::get('{any}', function () {
     return view('app');
 })->where('any', '.*');

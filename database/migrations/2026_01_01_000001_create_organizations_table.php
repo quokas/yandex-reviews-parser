@@ -11,9 +11,10 @@ return new class extends Migration
         Schema::create('organizations', function (Blueprint $table) {
             $table->id();
             $table->string('yandex_url')->unique();
-            $table->string('name')->nullable();
-            $table->decimal('rating', 2, 1)->default(0.0);
-            $table->integer('review_count')->default(0);
+            $table->string('name');
+            $table->decimal('rating', 2, 1);
+            $table->integer('rating_count'); // ПРОВЕРЬ НАЛИЧИЕ ЭТОЙ СТРОКИ
+            $table->integer('review_count'); // ПРОВЕРЬ НАЛИЧИЕ ЭТОЙ СТРОКИ
             $table->timestamps();
         });
     }
