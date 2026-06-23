@@ -29,3 +29,4 @@ Thumbs.db
 /vendor
 .env
 /database/database.sqlite
+/yandex_user_data/
