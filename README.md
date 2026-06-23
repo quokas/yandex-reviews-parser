@@ -22,7 +22,7 @@ Fullstack-приложение для автоматического сбора,
 
 ### 1. Клонирование проекта
 ```bash
-git clone https://github.com
+git clone https://github.com/quokas/yandex-reviews-parser.git
 cd yandex-reviews-parser
 ```
 
